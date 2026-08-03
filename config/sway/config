@@ -4,10 +4,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 set $mod Mod4
-set $left  h
-set $down  j
-set $up    k
-set $right l
 
 set $term       foot
 set $launcher   wofi --show drun --allow-images
@@ -41,10 +37,11 @@ input type:touchpad {
     accel_profile adaptive
 }
 
-# Keyboard — change layout as needed
+# Keyboard
 input type:keyboard {
-    xkb_layout us
-    xkb_options caps:escape   # Caps Lock → Escape (remove if unwanted)
+    xkb_layout no
+    # Caps Lock → Escape (remove if unwanted)
+    xkb_options caps:escape
 }
 
 # ─── Idle / lock ──────────────────────────────────────────────────────────────
@@ -91,20 +88,12 @@ bindsym $mod+Shift+e      exec swaynag -t warning \
     -B 'Yes, exit' 'swaymsg exit'
 
 # Focus
-bindsym $mod+$left        focus left
-bindsym $mod+$down        focus down
-bindsym $mod+$up          focus up
-bindsym $mod+$right       focus right
 bindsym $mod+Left         focus left
 bindsym $mod+Down         focus down
 bindsym $mod+Up           focus up
 bindsym $mod+Right        focus right
 
 # Move
-bindsym $mod+Shift+$left  move left
-bindsym $mod+Shift+$down  move down
-bindsym $mod+Shift+$up    move up
-bindsym $mod+Shift+$right move right
 bindsym $mod+Shift+Left   move left
 bindsym $mod+Shift+Down   move down
 bindsym $mod+Shift+Up     move up
@@ -163,11 +152,6 @@ bindsym XF86MonBrightnessDown exec brightnessctl set 5%-
 
 # ─── Resize mode ──────────────────────────────────────────────────────────────
 mode "resize" {
-    bindsym $left  resize shrink width  10px
-    bindsym $down  resize grow   height 10px
-    bindsym $up    resize shrink height 10px
-    bindsym $right resize grow   width  10px
-
     bindsym Left   resize shrink width  10px
     bindsym Down   resize grow   height 10px
     bindsym Up     resize shrink height 10px
