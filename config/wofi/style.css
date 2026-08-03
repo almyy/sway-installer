@@ -1,0 +1,46 @@
+/* wofi style — matches waybar theme */
+
+window {
+  background-color: #1a1a2e;
+  border: 1px solid #3b4252;
+  border-radius: 6px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 14px;
+}
+
+#input {
+  margin: 6px;
+  padding: 6px 10px;
+  background-color: #2e3440;
+  color: #d8dee9;
+  border: 1px solid #3b4252;
+  border-radius: 4px;
+  outline: none;
+}
+
+#input:focus {
+  border-color: #5e81ac;
+}
+
+#scroll {
+  margin: 0 6px 6px 6px;
+}
+
+#entry {
+  padding: 6px 10px;
+  border-radius: 4px;
+  color: #d8dee9;
+}
+
+#entry:selected {
+  background-color: #3b4252;
+  color: #eceff4;
+}
+
+#text {
+  color: inherit;
+}
+
+image {
+  margin-right: 6px;
+}

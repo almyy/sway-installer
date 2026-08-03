@@ -1,0 +1,27 @@
+# mako notification daemon config
+
+font=JetBrains Mono 11
+background-color=#2e3440ee
+text-color=#eceff4
+border-color=#5e81ac
+border-radius=6
+border-size=1
+width=320
+height=100
+margin=8
+padding=10
+default-timeout=5000
+max-visible=5
+layer=overlay
+anchor=top-right
+
+[urgency=low]
+border-color=#4c566a
+default-timeout=3000
+
+[urgency=normal]
+border-color=#5e81ac
+
+[urgency=high]
+border-color=#bf616a
+default-timeout=0
