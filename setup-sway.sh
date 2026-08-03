@@ -38,6 +38,9 @@ PACKAGES=(
   wl-clipboard
   xdg-desktop-portal-wlr
   fonts-jetbrains-mono
+  network-manager-gnome
+  blueman
+  swappy
 )
 
 MISSING=()
