@@ -1,0 +1,27 @@
+# mako config — Gruvbox theme
+
+font=JetBrains Mono 11
+background-color=#3c3836ee
+text-color=#ebdbb2
+border-color=#d79921
+border-radius=6
+border-size=1
+width=320
+height=100
+margin=8
+padding=10
+default-timeout=5000
+max-visible=5
+layer=overlay
+anchor=top-right
+
+[urgency=low]
+border-color=#504945
+default-timeout=3000
+
+[urgency=normal]
+border-color=#d79921
+
+[urgency=high]
+border-color=#cc241d
+default-timeout=0

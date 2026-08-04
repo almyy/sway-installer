@@ -1,0 +1,74 @@
+/* waybar style — Solarized Light theme, JetBrains Mono */
+
+* {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+}
+
+window#waybar {
+  background-color: #eee8d5;
+  color: #657b83;
+}
+
+#workspaces button {
+  padding: 0 8px;
+  color: #93a1a1;
+  background: transparent;
+  border-bottom: 2px solid transparent;
+}
+
+#workspaces button:hover {
+  background: #fdf6e3;
+  color: #586e75;
+}
+
+#workspaces button.focused {
+  color: #073642;
+  border-bottom: 2px solid #268bd2;
+}
+
+#workspaces button.urgent {
+  background: #dc322f;
+  color: #fdf6e3;
+}
+
+#mode {
+  padding: 0 8px;
+  color: #cb4b16;
+}
+
+#window {
+  padding: 0 8px;
+  color: #586e75;
+}
+
+#clock,
+#cpu,
+#memory,
+#battery,
+#network,
+#pulseaudio,
+#tray {
+  padding: 0 10px;
+  color: #657b83;
+}
+
+#clock { color: #268bd2; }
+
+#battery.warning  { color: #b58900; }
+#battery.critical { color: #dc322f; }
+#battery.charging { color: #859900; }
+
+#cpu    { color: #6c71c4; }
+#memory { color: #859900; }
+
+#network.disconnected { color: #dc322f; }
+
+tooltip {
+  background: #fdf6e3;
+  border: 1px solid #93a1a1;
+  color: #586e75;
+}

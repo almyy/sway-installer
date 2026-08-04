@@ -1,0 +1,46 @@
+/* wofi style — Catppuccin Mocha theme */
+
+window {
+  background-color: #1e1e2e;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 14px;
+}
+
+#input {
+  margin: 6px;
+  padding: 6px 10px;
+  background-color: #313244;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  outline: none;
+}
+
+#input:focus {
+  border-color: #cba6f7;
+}
+
+#scroll {
+  margin: 0 6px 6px 6px;
+}
+
+#entry {
+  padding: 6px 10px;
+  border-radius: 4px;
+  color: #cdd6f4;
+}
+
+#entry:selected {
+  background-color: #45475a;
+  color: #cdd6f4;
+}
+
+#text {
+  color: inherit;
+}
+
+image {
+  margin-right: 6px;
+}

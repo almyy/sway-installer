@@ -1,0 +1,74 @@
+/* waybar style — Catppuccin Mocha theme, JetBrains Mono */
+
+* {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+}
+
+window#waybar {
+  background-color: #1e1e2e;
+  color: #cdd6f4;
+}
+
+#workspaces button {
+  padding: 0 8px;
+  color: #585b70;
+  background: transparent;
+  border-bottom: 2px solid transparent;
+}
+
+#workspaces button:hover {
+  background: #313244;
+  color: #cdd6f4;
+}
+
+#workspaces button.focused {
+  color: #cdd6f4;
+  border-bottom: 2px solid #cba6f7;
+}
+
+#workspaces button.urgent {
+  background: #f38ba8;
+  color: #1e1e2e;
+}
+
+#mode {
+  padding: 0 8px;
+  color: #f9e2af;
+}
+
+#window {
+  padding: 0 8px;
+  color: #cdd6f4;
+}
+
+#clock,
+#cpu,
+#memory,
+#battery,
+#network,
+#pulseaudio,
+#tray {
+  padding: 0 10px;
+  color: #cdd6f4;
+}
+
+#clock { color: #89dceb; }
+
+#battery.warning  { color: #f9e2af; }
+#battery.critical { color: #f38ba8; }
+#battery.charging { color: #a6e3a1; }
+
+#cpu    { color: #cba6f7; }
+#memory { color: #a6e3a1; }
+
+#network.disconnected { color: #f38ba8; }
+
+tooltip {
+  background: #313244;
+  border: 1px solid #45475a;
+  color: #cdd6f4;
+}

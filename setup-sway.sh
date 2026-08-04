@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # setup-sway.sh — minimal sway install and configuration for Ubuntu 26.04+
 # Run as your normal user (not root). Uses sudo internally where needed.
+#
+# Usage: ./setup-sway.sh [--dry-run]
+#   --dry-run   Show what would be done without making any changes.
 set -euo pipefail
 
 # ─── Colours ──────────────────────────────────────────────────────────────────
@@ -10,17 +13,38 @@ CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
 info()    { echo -e "${CYAN}[info]${RESET}  $*"; }
 ok()      { echo -e "${GREEN}[ok]${RESET}    $*"; }
 warn()    { echo -e "${YELLOW}[warn]${RESET}  $*"; }
+dry()     { echo -e "${YELLOW}[dry-run]${RESET} $*"; }
 die()     { echo -e "${RED}[error]${RESET} $*" >&2; exit 1; }
 section() { echo -e "\n${BOLD}▸ $*${RESET}"; }
+
+# ─── Dry-run flag ─────────────────────────────────────────────────────────────
+DRY_RUN=false
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=true ;;
+    *) die "Unknown argument: $arg. Usage: $0 [--dry-run]" ;;
+  esac
+done
+
+# Wrappers — in dry-run mode, print instead of executing
+run()      { if $DRY_RUN; then dry "would run: $*"; else "$@"; fi; }
+run_sudo() { if $DRY_RUN; then dry "would run: sudo $*"; else sudo "$@"; fi; }
+
+if $DRY_RUN; then
+  echo ""
+  echo -e "${YELLOW}${BOLD}  Dry-run mode — no changes will be made.${RESET}"
+fi
 
 # ─── Guards ───────────────────────────────────────────────────────────────────
 [[ $EUID -eq 0 ]] && die "Do not run this script as root. It will use sudo when needed."
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_SRC="$SCRIPT_DIR/config"
+THEMES_DIR="$SCRIPT_DIR/themes"
 CONFIG_DST="$HOME/.config"
 
-[[ -d "$CONFIG_SRC" ]] || die "config/ directory not found next to this script (expected: $CONFIG_SRC)"
+[[ -d "$CONFIG_SRC" ]]  || die "config/ directory not found (expected: $CONFIG_SRC)"
+[[ -d "$THEMES_DIR" ]]  || die "themes/ directory not found (expected: $THEMES_DIR)"
 
 # ─── 1. Packages ──────────────────────────────────────────────────────────────
 section "Installing packages"
@@ -55,18 +79,52 @@ if [[ ${#MISSING[@]} -eq 0 ]]; then
   ok "All packages already installed."
 else
   info "Installing: ${MISSING[*]}"
-  sudo apt-get update -qq
-  sudo apt-get install -y "${MISSING[@]}"
-  ok "Packages installed."
+  run_sudo apt-get update -qq
+  run_sudo apt-get install -y "${MISSING[@]}"
+  $DRY_RUN || ok "Packages installed."
 fi
 
-# ─── 2. Install configs ───────────────────────────────────────────────────────
+# ─── 2. Theme selection ───────────────────────────────────────────────────────
+section "Choose a theme"
+
+echo ""
+echo -e "  ${BOLD}1)${RESET} Nord            — dark blue-grey ${CYAN}(default)${RESET}"
+echo -e "  ${BOLD}2)${RESET} Gruvbox         — warm dark, earthy amber"
+echo -e "  ${BOLD}3)${RESET} Catppuccin      — pastel dark, soft purple"
+echo -e "  ${BOLD}4)${RESET} Solarized Light — classic light theme"
+echo ""
+
+THEME_DIR=""
+while true; do
+  read -rp "  Enter choice [1]: " choice
+  choice="${choice:-1}"
+  case "$choice" in
+    1) THEME_DIR="$THEMES_DIR/nord";             break ;;
+    2) THEME_DIR="$THEMES_DIR/gruvbox";          break ;;
+    3) THEME_DIR="$THEMES_DIR/catppuccin";       break ;;
+    4) THEME_DIR="$THEMES_DIR/solarized-light";  break ;;
+    *) warn "Invalid choice — enter 1, 2, 3 or 4." ;;
+  esac
+done
+
+# Source theme variables
+# shellcheck source=/dev/null
+source "$THEME_DIR/sway-theme.conf"
+ok "Theme selected: $THEME_NAME"
+
+# ─── 3. Install configs ───────────────────────────────────────────────────────
 section "Installing config files"
 
 # Back up a file if it exists and no .bak is present yet, then copy the new one
 install_config() {
   local src="$1"
   local dst="$2"
+
+  if $DRY_RUN; then
+    dry "would install: $src → $dst"
+    [[ -e "$dst" && ! -e "${dst}.bak" ]] && dry "would backup: $dst → ${dst}.bak"
+    return
+  fi
 
   mkdir -p "$(dirname "$dst")"
 
@@ -81,15 +139,44 @@ install_config() {
   ok "Installed: $dst"
 }
 
-install_config "$CONFIG_SRC/sway/config"           "$CONFIG_DST/sway/config"
-install_config "$CONFIG_SRC/waybar/config"         "$CONFIG_DST/waybar/config"
-install_config "$CONFIG_SRC/waybar/style.css"      "$CONFIG_DST/waybar/style.css"
-install_config "$CONFIG_SRC/wofi/style.css"        "$CONFIG_DST/wofi/style.css"
-install_config "$CONFIG_SRC/foot/foot.ini"         "$CONFIG_DST/foot/foot.ini"
-install_config "$CONFIG_SRC/mako/config"           "$CONFIG_DST/mako/config"
-install_config "$CONFIG_SRC/nwg-bar/bar.json"      "$CONFIG_DST/nwg-bar/bar.json"
+# sway/config — install from config/ then patch theme colours in place
+install_config "$CONFIG_SRC/sway/config" "$CONFIG_DST/sway/config"
 
-# ─── 3. PAM — gnome-keyring auto-unlock ───────────────────────────────────────
+# Patch background colour
+run sed -i "s|^output \* bg #[0-9a-fA-F]\{6\} solid_color|output * bg ${BG_COLOR} solid_color|" \
+  "$CONFIG_DST/sway/config"
+
+# Patch locker colour
+run sed -i "s|swaylock -f -c [0-9a-fA-F]\{6\}|swaylock -f -c ${LOCKER_COLOR}|" \
+  "$CONFIG_DST/sway/config"
+
+# Patch client colour block — replace the 4 client.* lines
+run sed -i \
+  "/^client\.focused /c\\client.focused          ${CLIENT_FOCUSED}" \
+  "$CONFIG_DST/sway/config"
+run sed -i \
+  "/^client\.focused_inactive /c\\client.focused_inactive ${CLIENT_FOCUSED_INACTIVE}" \
+  "$CONFIG_DST/sway/config"
+run sed -i \
+  "/^client\.unfocused /c\\client.unfocused        ${CLIENT_UNFOCUSED}" \
+  "$CONFIG_DST/sway/config"
+run sed -i \
+  "/^client\.urgent /c\\client.urgent           ${CLIENT_URGENT}" \
+  "$CONFIG_DST/sway/config"
+
+$DRY_RUN || ok "Patched theme colours into sway/config"
+
+# Non-themed config files
+install_config "$CONFIG_SRC/waybar/config"     "$CONFIG_DST/waybar/config"
+install_config "$CONFIG_SRC/nwg-bar/bar.json"  "$CONFIG_DST/nwg-bar/bar.json"
+
+# Themed config files
+install_config "$THEME_DIR/waybar/style.css"   "$CONFIG_DST/waybar/style.css"
+install_config "$THEME_DIR/wofi/style.css"     "$CONFIG_DST/wofi/style.css"
+install_config "$THEME_DIR/foot/foot.ini"      "$CONFIG_DST/foot/foot.ini"
+install_config "$THEME_DIR/mako/config"        "$CONFIG_DST/mako/config"
+
+# ─── 4. PAM — gnome-keyring auto-unlock ───────────────────────────────────────
 section "Configuring PAM for gnome-keyring auto-unlock"
 
 patch_pam() {
@@ -97,6 +184,13 @@ patch_pam() {
 
   if [[ ! -f "$pamfile" ]]; then
     warn "PAM file not found, skipping: $pamfile"
+    return
+  fi
+
+  if $DRY_RUN; then
+    dry "would patch PAM: $pamfile"
+    dry "would add: auth     optional  pam_gnome_keyring.so"
+    dry "would add: session  optional  pam_gnome_keyring.so auto_start"
     return
   fi
 
@@ -126,10 +220,14 @@ patch_pam() {
 }
 
 patch_pam
+
+# ─── 5. Summary ───────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "${GREEN}${BOLD}  Setup complete!${RESET}"
 echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo ""
+echo -e "  Theme installed: ${BOLD}${THEME_NAME}${RESET}"
 echo ""
 echo -e "  ${BOLD}Next steps:${RESET}"
 echo ""
@@ -153,14 +251,15 @@ echo -e "  5. ${CYAN}Screen sharing${RESET} (e.g. Firefox/Chrome) works via"
 echo -e "     xdg-desktop-portal-wlr. If not, log out and back in."
 echo ""
 echo -e "  ${BOLD}Key bindings quick reference:${RESET}"
-echo -e "    Super+Enter       terminal"
-echo -e "    Super+d           launcher (wofi)"
-echo -e "    Super+l           lock screen"
-echo -e "    Super+Shift+e     exit sway"
-echo -e "    Super+Shift+r     reload config"
-echo -e "    Super+r           resize mode"
-echo -e "    Super+arrows      focus"
+echo -e "    Super+Enter         terminal"
+echo -e "    Super+d             launcher (wofi)"
+echo -e "    Super+l             lock screen"
+echo -e "    Super+Shift+p       power menu (shutdown/reboot/logout)"
+echo -e "    Super+Shift+e       exit sway"
+echo -e "    Super+Shift+r       reload config"
+echo -e "    Super+r             resize mode"
+echo -e "    Super+arrows        focus"
 echo -e "    Super+Shift+arrows  move window"
-echo -e "    Super+1-9         switch workspace"
-echo -e "    Print             screenshot (area)"
+echo -e "    Super+1-9           switch workspace"
+echo -e "    Print               screenshot area → swappy"
 echo ""

@@ -1,0 +1,46 @@
+/* wofi style — Solarized Light theme */
+
+window {
+  background-color: #fdf6e3;
+  border: 1px solid #93a1a1;
+  border-radius: 6px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 14px;
+}
+
+#input {
+  margin: 6px;
+  padding: 6px 10px;
+  background-color: #eee8d5;
+  color: #586e75;
+  border: 1px solid #93a1a1;
+  border-radius: 4px;
+  outline: none;
+}
+
+#input:focus {
+  border-color: #268bd2;
+}
+
+#scroll {
+  margin: 0 6px 6px 6px;
+}
+
+#entry {
+  padding: 6px 10px;
+  border-radius: 4px;
+  color: #586e75;
+}
+
+#entry:selected {
+  background-color: #eee8d5;
+  color: #073642;
+}
+
+#text {
+  color: inherit;
+}
+
+image {
+  margin-right: 6px;
+}
