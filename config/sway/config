@@ -91,6 +91,10 @@ bindsym $mod+Shift+e      exec swaynag -t warning \
     -B 'Yes, exit' 'swaymsg exit'
 bindsym $mod+Shift+p      exec nwg-bar
 
+# Move workspace to output
+bindsym $mod+Ctrl+Shift+Left   move workspace to output left
+bindsym $mod+Ctrl+Shift+Right  move workspace to output right
+
 # Focus
 bindsym $mod+Left         focus left
 bindsym $mod+Down         focus down
