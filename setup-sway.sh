@@ -140,7 +140,28 @@ done
 
 ok "Gap size: inner ${INNER_GAP}px, outer ${OUTER_GAP}px$(${NO_BORDERS} && echo ', borders disabled')"
 
-# ─── 3. Install configs ───────────────────────────────────────────────────────
+# ─── 4. Bar placement ─────────────────────────────────────────────────────────
+section "Choose bar placement"
+
+echo ""
+echo -e "  ${BOLD}1)${RESET} Bottom ${CYAN}(default)${RESET}"
+echo -e "  ${BOLD}2)${RESET} Top"
+echo ""
+
+BAR_POSITION="bottom"
+while true; do
+  read -rp "  Enter choice [1]: " choice
+  choice="${choice:-1}"
+  case "$choice" in
+    1) BAR_POSITION="bottom"; break ;;
+    2) BAR_POSITION="top";    break ;;
+    *) warn "Invalid choice — enter 1 or 2." ;;
+  esac
+done
+
+ok "Bar position: $BAR_POSITION"
+
+# ─── 5. Install configs ───────────────────────────────────────────────────────
 section "Installing config files"
 
 # Back up a file if it exists and no .bak is present yet, then copy the new one
@@ -208,6 +229,8 @@ $DRY_RUN || ok "Patched gaps into sway/config"
 
 # Non-themed config files
 install_config "$CONFIG_SRC/waybar/config"     "$CONFIG_DST/waybar/config"
+run sed -i "s/\"position\": \".*\"/\"position\": \"${BAR_POSITION}\"/" "$CONFIG_DST/waybar/config"
+$DRY_RUN || ok "Patched bar position into waybar/config"
 install_config "$CONFIG_SRC/nwg-bar/bar.json"  "$CONFIG_DST/nwg-bar/bar.json"
 
 # Themed config files
