@@ -112,6 +112,34 @@ done
 source "$THEME_DIR/sway-theme.conf"
 ok "Theme selected: $THEME_NAME"
 
+# ─── 3. Gap size selection ────────────────────────────────────────────────────
+section "Choose gap size"
+
+echo ""
+echo -e "  ${BOLD}1)${RESET} None   — no gaps or borders"
+echo -e "  ${BOLD}2)${RESET} Small  — 4px inner, 2px outer"
+echo -e "  ${BOLD}3)${RESET} Medium — 8px inner, 4px outer ${CYAN}(default)${RESET}"
+echo -e "  ${BOLD}4)${RESET} Large  — 16px inner, 8px outer"
+echo ""
+
+INNER_GAP=8
+OUTER_GAP=4
+NO_BORDERS=false
+
+while true; do
+  read -rp "  Enter choice [3]: " choice
+  choice="${choice:-3}"
+  case "$choice" in
+    1) INNER_GAP=0;  OUTER_GAP=0;  NO_BORDERS=true;  break ;;
+    2) INNER_GAP=4;  OUTER_GAP=2;  NO_BORDERS=false; break ;;
+    3) INNER_GAP=8;  OUTER_GAP=4;  NO_BORDERS=false; break ;;
+    4) INNER_GAP=16; OUTER_GAP=8;  NO_BORDERS=false; break ;;
+    *) warn "Invalid choice — enter 1, 2, 3 or 4." ;;
+  esac
+done
+
+ok "Gap size: inner ${INNER_GAP}px, outer ${OUTER_GAP}px$(${NO_BORDERS} && echo ', borders disabled')"
+
 # ─── 3. Install configs ───────────────────────────────────────────────────────
 section "Installing config files"
 
@@ -165,6 +193,18 @@ run sed -i \
   "$CONFIG_DST/sway/config"
 
 $DRY_RUN || ok "Patched theme colours into sway/config"
+
+# Patch gap sizes
+run sed -i "s/^gaps inner .*/gaps inner ${INNER_GAP}/" "$CONFIG_DST/sway/config"
+run sed -i "s/^gaps outer .*/gaps outer ${OUTER_GAP}/" "$CONFIG_DST/sway/config"
+
+# Disable borders if no gaps selected
+if $NO_BORDERS; then
+  run sed -i "s/^default_border .*/default_border none/"                   "$CONFIG_DST/sway/config"
+  run sed -i "s/^default_floating_border .*/default_floating_border none/" "$CONFIG_DST/sway/config"
+fi
+
+$DRY_RUN || ok "Patched gaps into sway/config"
 
 # Non-themed config files
 install_config "$CONFIG_SRC/waybar/config"     "$CONFIG_DST/waybar/config"
