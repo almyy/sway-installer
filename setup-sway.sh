@@ -41,6 +41,9 @@ PACKAGES=(
   network-manager-gnome
   blueman
   swappy
+  nwg-bar
+  gnome-keyring
+  libpam-gnome-keyring
 )
 
 MISSING=()
@@ -78,14 +81,51 @@ install_config() {
   ok "Installed: $dst"
 }
 
-install_config "$CONFIG_SRC/sway/config"       "$CONFIG_DST/sway/config"
-install_config "$CONFIG_SRC/waybar/config"     "$CONFIG_DST/waybar/config"
-install_config "$CONFIG_SRC/waybar/style.css"  "$CONFIG_DST/waybar/style.css"
-install_config "$CONFIG_SRC/wofi/style.css"    "$CONFIG_DST/wofi/style.css"
-install_config "$CONFIG_SRC/foot/foot.ini"     "$CONFIG_DST/foot/foot.ini"
-install_config "$CONFIG_SRC/mako/config"       "$CONFIG_DST/mako/config"
+install_config "$CONFIG_SRC/sway/config"           "$CONFIG_DST/sway/config"
+install_config "$CONFIG_SRC/waybar/config"         "$CONFIG_DST/waybar/config"
+install_config "$CONFIG_SRC/waybar/style.css"      "$CONFIG_DST/waybar/style.css"
+install_config "$CONFIG_SRC/wofi/style.css"        "$CONFIG_DST/wofi/style.css"
+install_config "$CONFIG_SRC/foot/foot.ini"         "$CONFIG_DST/foot/foot.ini"
+install_config "$CONFIG_SRC/mako/config"           "$CONFIG_DST/mako/config"
+install_config "$CONFIG_SRC/nwg-bar/bar.json"      "$CONFIG_DST/nwg-bar/bar.json"
 
-# ─── 3. Summary ───────────────────────────────────────────────────────────────
+# ─── 3. PAM — gnome-keyring auto-unlock ───────────────────────────────────────
+section "Configuring PAM for gnome-keyring auto-unlock"
+
+patch_pam() {
+  local pamfile="/etc/pam.d/gdm-password"
+
+  if [[ ! -f "$pamfile" ]]; then
+    warn "PAM file not found, skipping: $pamfile"
+    return
+  fi
+
+  # Backup
+  if [[ ! -f "${pamfile}.bak" ]]; then
+    sudo cp "$pamfile" "${pamfile}.bak"
+    warn "Backed up: $pamfile → ${pamfile}.bak"
+  fi
+
+  # Patch auth line if not already present
+  if ! sudo grep -q "^auth.*pam_gnome_keyring" "$pamfile"; then
+    sudo sed -i '/^auth.*pam_unix\.so/a auth     optional  pam_gnome_keyring.so' "$pamfile"
+  fi
+
+  # Patch session line if not already present
+  if ! sudo grep -q "^session.*pam_gnome_keyring" "$pamfile"; then
+    sudo sed -i '/^session.*pam_unix\.so/a session  optional  pam_gnome_keyring.so auto_start' "$pamfile"
+  fi
+
+  # Verify both lines are present after patching
+  if sudo grep -q "^auth.*pam_gnome_keyring" "$pamfile" && \
+     sudo grep -q "^session.*pam_gnome_keyring" "$pamfile"; then
+    ok "PAM keyring integration active: $pamfile"
+  else
+    warn "PAM patch may be incomplete — verify $pamfile manually"
+  fi
+}
+
+patch_pam
 echo ""
 echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "${GREEN}${BOLD}  Setup complete!${RESET}"
@@ -119,8 +159,8 @@ echo -e "    Super+l           lock screen"
 echo -e "    Super+Shift+e     exit sway"
 echo -e "    Super+Shift+r     reload config"
 echo -e "    Super+r           resize mode"
-echo -e "    Super+hjkl/arrows focus"
-echo -e "    Super+Shift+hjkl  move window"
+echo -e "    Super+arrows      focus"
+echo -e "    Super+Shift+arrows  move window"
 echo -e "    Super+1-9         switch workspace"
 echo -e "    Print             screenshot (area)"
 echo ""
