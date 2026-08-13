@@ -28,6 +28,9 @@ font pango:JetBrains Mono 10
 # Default wallpaper (solid colour — replace with a path to an image if desired)
 output * bg #1a1a2e solid_color
 
+# Output layout written by nwg-displays. Harmless if the file does not exist yet.
+include outputs
+
 # ─── Input ────────────────────────────────────────────────────────────────────
 # Touchpad
 input type:touchpad {

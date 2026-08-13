@@ -172,8 +172,10 @@ install_config() {
 
   if $DRY_RUN; then
     dry "would install: $src → $dst"
-    [[ -e "$dst" && ! -e "${dst}.bak" ]] && dry "would backup: $dst → ${dst}.bak"
-    return
+    if [[ -e "$dst" && ! -e "${dst}.bak" ]]; then
+      dry "would backup: $dst → ${dst}.bak"
+    fi
+    return 0
   fi
 
   mkdir -p "$(dirname "$dst")"
@@ -233,6 +235,9 @@ install_config "$CONFIG_SRC/waybar/config"     "$CONFIG_DST/waybar/config"
 run sed -i "s/\"position\": \".*\"/\"position\": \"${BAR_POSITION}\"/" "$CONFIG_DST/waybar/config"
 $DRY_RUN || ok "Patched bar position into waybar/config"
 install_config "$CONFIG_SRC/nwg-bar/bar.json"  "$CONFIG_DST/nwg-bar/bar.json"
+run sed -i "s|swaylock -f -c [0-9a-fA-F]\{6\}|swaylock -f -c ${LOCKER_COLOR}|" \
+  "$CONFIG_DST/nwg-bar/bar.json"
+$DRY_RUN || ok "Patched locker colour into nwg-bar/bar.json"
 
 # Themed config files
 install_config "$THEME_DIR/waybar/style.css"   "$CONFIG_DST/waybar/style.css"
@@ -302,10 +307,10 @@ echo -e "       swaymsg \"output * bg /path/to/image fill\""
 echo -e "     Or edit ~/.config/sway/config:"
 echo -e "       output * bg /path/to/image fill"
 echo ""
-echo -e "  3. ${CYAN}Configure monitors${RESET} — edit ~/.config/sway/config and"
-echo -e "     uncomment / adapt the output section. Run:"
-echo -e "       swaymsg -t get_outputs"
-echo -e "     to list your display names."
+echo -e "  3. ${CYAN}Configure monitors${RESET} — run:"
+echo -e "       nwg-displays"
+echo -e "     It saves your layout to ~/.config/sway/outputs, which"
+echo -e "     ~/.config/sway/config already includes."
 echo ""
 echo -e "  4. ${CYAN}Brightness keys${RESET} need brightnessctl:"
 echo -e "       sudo apt install brightnessctl"
