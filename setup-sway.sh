@@ -68,6 +68,7 @@ PACKAGES=(
   nwg-bar
   gnome-keyring
   libpam-gnome-keyring
+  nwg-displays
 )
 
 MISSING=()
