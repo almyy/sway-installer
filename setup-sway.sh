@@ -213,6 +213,7 @@ install_bin() {
 }
 
 install_bin "$BIN_SRC/sway-output-profiles" "$BIN_DST/sway-output-profiles"
+install_bin "$BIN_SRC/sway-docked"          "$BIN_DST/sway-docked"
 
 # sway/config — install from config/ then patch theme colours in place
 install_config "$CONFIG_SRC/sway/config" "$CONFIG_DST/sway/config"
@@ -336,6 +337,8 @@ echo -e "     ~/.config/sway-output-profiles/profiles/. Plug a monitor in and a"
 echo -e "     profile is created; rearrange with ${BOLD}Super+Shift+d${RESET} and the change is"
 echo -e "     saved and reapplied next time that monitor is connected."
 echo -e "     Lost a display? ${BOLD}Super+Ctrl+d${RESET} turns them all back on."
+echo -e "     Closing the lid with an external display connected just turns the"
+echo -e "     built-in screen off — no lock, no suspend. On its own it locks."
 echo ""
 echo -e "  4. ${CYAN}Brightness keys${RESET} need brightnessctl:"
 echo -e "       sudo apt install brightnessctl"

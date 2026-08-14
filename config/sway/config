@@ -8,6 +8,10 @@ set $mod Mod4
 set $term       foot
 set $launcher   wofi --show drun --allow-images
 set $locker     swaylock -f -c 1a1a2e
+# Lid and idle policy that depends on an external display being connected.
+# $HOME is not a sway variable, so it survives substitution and is expanded by
+# the sh that runs exec and swayidle commands.
+set $docked     $HOME/.local/bin/sway-docked
 
 font pango:JetBrains Mono 10
 
@@ -47,12 +51,19 @@ exec swayidle -w \
     timeout 300  "$locker" \
     timeout 600  'swaymsg "output * dpms off"' \
     resume       'swaymsg "output * dpms on"'  \
-    timeout 660  'systemctl suspend' \
+    timeout 660  "$docked || systemctl suspend" \
     before-sleep "$locker" \
     lock         "$locker"
 
-# Lock on lid close
-bindswitch --reload --locked lid:on exec $locker
+# Lid close. With an external display connected it only turns the built-in
+# panel off — you carry on working on the external screen, unlocked. On its own
+# the laptop locks here and logind suspends it. sway-docked exits 0 when it has
+# handled things, so the `|| $locker` fallback keeps $locker as the single place
+# the lock command is spelled out. exec hands the whole line to sh, so `||`
+# works. lid:off only undoes a lid-close of ours, never a display you turned off
+# yourself. --reload on both re-asserts the right state after $mod+Shift+r.
+bindswitch --reload --locked lid:on  exec $docked lid-close || $locker
+bindswitch --reload --locked lid:off exec $docked lid-open
 
 # ─── Autostart ────────────────────────────────────────────────────────────────
 # exec_always, not exec: a reload rebuilds the output layout from this file

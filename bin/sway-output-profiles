@@ -21,6 +21,7 @@ PROFILE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sway-output-profiles/profiles"
 RUNDIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 LOCKFILE="$RUNDIR/sway-output-profiles.lock"
 PIDFILE="$RUNDIR/sway-output-profiles.pid"
+LIDFILE="$RUNDIR/sway-output-profiles.lid"
 
 DEBOUNCE=0.4      # seconds of quiet after the last event before acting
 DEBOUNCE_MAX=5    # ceiling on draining, for docks that enumerate slowly
@@ -44,6 +45,15 @@ now() { printf '%(%s)T' -1; }
 JQ_REAL='[ .[] | select((.non_desktop // false) | not) ]'
 
 # ─── Snapshot helpers ─────────────────────────────────────────────────────────
+
+# "closed" only while sway-docked has the built-in panel turned off for a shut
+# lid. Written by sway-docked, which sway drives from libinput via bindswitch —
+# more trustworthy than /proc/acpi/button/lid/*/state, which lies on some
+# laptops. Anything else, including a missing file, reads as open.
+lid_state() {
+  [[ "$(cat "$LIDFILE" 2>/dev/null)" == closed ]] && printf 'closed'
+  return 0
+}
 
 # A snapshot is unusable while outputs are powered off: sway then reports
 # current_mode as 0x0@0, and saving that would write `mode 0x0@0Hz` into the
@@ -70,12 +80,21 @@ snapshot_usable() {
 # repeats we fold the connector names in as well. Connector names are not stable
 # across reboots, which makes that case fail safe: a shuffle yields a *new*
 # profile (one re-arrange) rather than a wrong-monitor apply.
+#
+# Lid state ($2) is part of the identity too. A shut lid does not change the set
+# of connected outputs — the built-in panel is still reported, merely inactive —
+# so without this, sway-docked turning it off would look like a layout edit and
+# be saved into the docked profile, blanking the panel on the next dock with the
+# lid open. Keyed separately, docked-lid-shut and docked-lid-open are just two
+# layouts and every existing rule applies to each unchanged. Appended last, so
+# the string stays deterministic.
 fingerprint() {
-  jq -r "$JQ_REAL"' as $o
+  jq -r --arg lid "${2:-}" "$JQ_REAL"' as $o
     | ($o | map("\(.make // "Unknown") \(.model // "Unknown") \(.serial // "Unknown")") | sort) as $ds
     | (($ds | group_by(.) | map(select(length > 1)) | length) > 0) as $dup
     | "\($ds | length)|" + ($ds | join("\u001f"))
       + (if $dup then "|" + ($o | map(.name) | sort | join("\u001f")) else "" end)
+      + (if $lid != "" then "|lid=" + $lid else "" end)
   ' <<<"$1" 2>/dev/null
 }
 
@@ -214,7 +233,7 @@ do_cycle() {
   local forced="${1:-0}" snap fp
   snap=$(swaymsg -t get_outputs -r 2>/dev/null) || { log "get_outputs failed"; return; }
   snapshot_usable "$snap" || return   # deliberately does not touch last_fp
-  fp=$(fingerprint "$snap")
+  fp=$(fingerprint "$snap" "$(lid_state)")
   [[ -n "$fp" ]] || return
 
   if (( forced )) || [[ "$fp" != "$last_fp" ]]; then
@@ -243,7 +262,7 @@ flush_pending() {
   (( $(now) < suppress_until )) && return
   snap=$(swaymsg -t get_outputs -r 2>/dev/null) || return
   snapshot_usable "$snap" || return
-  [[ "$(fingerprint "$snap")" == "$fp" ]] || return
+  [[ "$(fingerprint "$snap" "$(lid_state)")" == "$fp" ]] || return
   write_profile "$snap" "$fp" "saved"
 }
 

@@ -53,7 +53,8 @@ Then log out and select **Sway** at the GDM login screen.
 
 ```
 bin/                        # executables, installed to ~/.local/bin/
-└── sway-output-profiles    # remembers a monitor layout per set of outputs
+├── sway-output-profiles    # remembers a monitor layout per set of outputs
+└── sway-docked             # lid and idle behaviour when an external display is connected
 
 config/                     # theme-independent, shared by all themes
 ├── sway/config             # keybindings, gaps, colours, idle, autostart
@@ -126,6 +127,8 @@ all-off layout, so you should not be able to get there by accident.
 
 Notes:
 
+- Lid open and lid closed are remembered as *separate* layouts for the same set of displays, so the position and scale you set up with the lid open survive a day of working with it shut. That is also why the built-in display being off behind a closed lid is never mistaken for you switching it off on purpose.
+- Pressing Super+Ctrl+d with the lid shut turns the built-in display back on and that gets saved, so the next lid close leaves it lit. Open and close the lid once to get back to normal.
 - Two monitors of the same model *and* serial cannot be told apart by description, so those profiles key on connector name (`DP-1`, `DP-2`) instead. Connector names can shuffle across reboots or dock re-plugs; if that happens you get a fresh profile and one re-arrange.
 - If `wdisplays` is open when you plug or unplug a monitor, its window resets to match the new hardware and an edit in progress may need redoing — normal behaviour for any output-management client, not specific to this setup.
 - Daemon output goes to the sway log — `journalctl --user -b | grep sway-output-profiles` if something looks wrong.
@@ -210,9 +213,16 @@ Volume and mic mute go through `wpctl` (PipeWire); brightness needs `brightnessc
 |---|---|
 | 5 min idle | Lock screen |
 | 10 min idle | Turn off displays |
-| 11 min idle | Suspend |
-| Lid close | Lock screen |
+| 11 min idle | Suspend — skipped while an external display is connected |
+| Lid close, external display connected | Turn the built-in display off, nothing else |
+| Lid close, no external display | Lock screen (and logind suspends) |
+| Lid open | Turn the built-in display back on |
 | Before sleep | Lock screen |
+
+Closing the lid while docked does not lock, on the grounds that you are sitting in front of
+the external screen. Idle still locks after 5 minutes either way. A display is "external"
+when sway names it something other than `eDP-*`, `LVDS-*` or `DSI-*` — the same rule
+systemd-logind uses.
 
 ## Adding a theme
 

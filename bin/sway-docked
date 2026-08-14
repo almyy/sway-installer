@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# sway-docked — lid and idle policy that depends on whether an external display
+# is connected.
+#
+#   sway-docked             exit 0 if at least one external display is connected
+#   sway-docked lid-close   docked   → turn every built-in panel off, exit 0
+#                           undocked → do nothing, exit 1 (the caller locks)
+#   sway-docked lid-open    undo a lid-close, exit 0; no-op if we did not do it
+#
+# Exit status means "docked / handled" throughout, so the sway config can say
+#
+#   bindswitch --reload --locked lid:on exec $docked lid-close || $locker
+#   ...  timeout 660 "$docked || systemctl suspend"
+#
+# and keep $locker as the one place the lock command is spelled out.
+#
+# Built-in panels are the outputs sway names eDP-*, LVDS-* or DSI-*, which is
+# the same rule systemd-logind uses to decide whether a lid close means
+# "docked". Names come from sway, never hardcoded.
+#
+# Lid state is written to LIDFILE for sway-output-profiles, which folds it into
+# its fingerprint so a docked-lid-shut layout is remembered separately from a
+# docked-lid-open one. Without that, disabling the panel here would be saved as
+# an edit to the docked profile and would blank the panel on the next dock.
+
+set -uo pipefail
+
+RUNDIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+LIDFILE="$RUNDIR/sway-output-profiles.lid"
+INTERNAL_RE='^(eDP|LVDS|DSI)-'
+
+# Same filter as sway-output-profiles: VR / DRM-lease headsets are reported by
+# get_outputs but are not displays anyone docks to.
+JQ_REAL='[ .[] | select((.non_desktop // false) | not) ]'
+
+outputs() { swaymsg -t get_outputs -r 2>/dev/null; }
+
+# Names of built-in panels, one per line, optionally filtered by .active.
+internal_names() {
+  local snap="$1" want="${2:-any}"
+  jq -r --arg re "$INTERNAL_RE" --arg want "$want" "$JQ_REAL"'
+    | .[]
+    | select(.name | test($re))
+    | select($want == "any"
+             or ($want == "active"   and .active)
+             or ($want == "inactive" and (.active | not)))
+    | .name
+  ' <<<"$snap" 2>/dev/null
+}
+
+# 0 when an external display is connected. A failed or empty get_outputs counts
+# as "not docked", so every failure path falls towards locking.
+is_docked() {
+  local n
+  n=$(jq -r --arg re "$INTERNAL_RE" "$JQ_REAL"'
+        | map(select(.name | test($re) | not)) | length
+      ' <<<"$1" 2>/dev/null) || return 1
+  [[ "${n:-0}" =~ ^[0-9]+$ ]] && (( n > 0 ))
+}
+
+set_lid() { printf '%s\n' "$1" >"$LIDFILE" 2>/dev/null; }
+lid_is_closed() { [[ "$(cat "$LIDFILE" 2>/dev/null)" == closed ]]; }
+
+case "${1:-}" in
+  '')
+    is_docked "$(outputs)"
+    ;;
+
+  lid-close)
+    snap=$(outputs)
+    is_docked "$snap" || { set_lid open; exit 1; }
+    # LIDFILE first: the swaymsg below is what wakes the daemon, so it can never
+    # see the new output state alongside a stale lid state.
+    set_lid closed
+    while read -r name; do
+      [[ -n "$name" ]] && swaymsg -- "output \"$name\" disable" >/dev/null 2>&1
+    done < <(internal_names "$snap" active)
+    exit 0
+    ;;
+
+  lid-open)
+    # Only undo a panel *we* turned off. A layout may legitimately disable the
+    # built-in display with the lid open (wdisplays, or a saved profile); a
+    # reload fires this binding too, and re-enabling there would fight the user.
+    lid_is_closed || exit 0
+    set_lid open
+    snap=$(outputs)
+    while read -r name; do
+      # Bare enable: preferred mode and position, possibly wrong. The output
+      # event that follows makes sway-output-profiles apply the saved lid-open
+      # profile a moment later, which corrects it — and if no profile exists
+      # yet, this still leaves a usable screen.
+      [[ -n "$name" ]] && swaymsg -- "output \"$name\" enable" >/dev/null 2>&1
+    done < <(internal_names "$snap" inactive)
+    exit 0
+    ;;
+
+  *)
+    printf 'usage: %s [lid-close|lid-open]\n' "${0##*/}" >&2
+    exit 2
+    ;;
+esac

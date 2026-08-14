@@ -33,7 +33,7 @@ Two source trees feed `~/.config/`:
 - **`config/`** — theme-agnostic sources: `sway/config`, `waybar/config`, `nwg-bar/bar.json`. One copy, shared by all themes.
 - **`themes/<name>/`** — per-theme variants: `waybar/style.css`, `wofi/style.css`, `foot/foot.ini`, `mako/config` (copied verbatim), plus `sway-theme.conf`.
 
-A third tree, **`bin/`**, feeds `~/.local/bin/` via `install_bin` (cp + `chmod 0755`, no `.bak`). It holds `sway-output-profiles`.
+A third tree, **`bin/`**, feeds `~/.local/bin/` via `install_bin` (cp + `chmod 0755`, no `.bak`). It holds `sway-output-profiles` and `sway-docked`.
 
 `sway-theme.conf` is not a config file — it's a shell fragment `source`d by the installer, exporting `THEME_NAME`, `BG_COLOR`, `LOCKER_COLOR`, and the four `CLIENT_*` colour tuples (`border bg text indicator child_border`).
 
@@ -84,6 +84,7 @@ Nothing here is arbitrary — each of these guards exists because removing it ca
 - **Duplicate-description fallback.** Identical panels report identical `make model serial`, and one criteria matching two outputs stacks them. When a description repeats, the profile keys on connector names *and* the names join the fingerprint — so a name shuffle yields a new profile rather than a wrong-monitor apply.
 - **`snapshot_usable` requires at least one *active* output.** Every other clause in it reads "(inactive) or (sane)", so with all outputs inactive they are vacuously true and an all-disabled state looks like a good snapshot. Without this clause the daemon saves a profile of pure `disable` lines and reapplies it at every login. That is unrecoverable from inside the session: sway's `root->fallback_output` is deliberately given no scene output (`handle_new_output()` says so explicitly), is never committed, and is not advertised as a wlr-output-management head — so with zero enabled outputs nothing is composited and no Wayland client can draw. This clause is why `$mod+Ctrl+d` should never be needed.
 - **`apply_profile` refuses a profile that enables nothing.** Belt to the above's braces, since versions before that guard could have written one to disk. A bad file stays but is inert, and the next real change overwrites it.
+- **Lid state is part of the fingerprint.** `bin/sway-docked` disables the built-in panel when the lid shuts with an external display connected, and that does *not* change the set of connected outputs — the panel is still in `get_outputs`, merely `active: false`. Without the `|lid=closed` suffix the daemon reads it as a geometry edit and saves `disable` into the docked profile, so the next dock with the lid open blanks the laptop screen. With it, docked-lid-shut and docked-lid-open are two profiles and every other rule applies to each unchanged: closing or opening the lid is an ordinary fingerprint change that `reconcile` handles, and rearranging externals with the lid shut cannot touch the lid-open layout. `sway-docked` writes `$XDG_RUNTIME_DIR/sway-output-profiles.lid` *before* the `swaymsg` that wakes the daemon, so the daemon never pairs new output state with a stale lid state. It is the authority on lid state, not `/proc/acpi/button/lid/*/state`, which lies on some laptops — and it writes `closed` only when it actually turned the panel off, so a lid close with nothing docked is invisible here.
 - **Loop-breaker.** A backstop against a runaway rewrite: >`LOOP_MAX` writes for the *same* fingerprint inside `LOOP_WINDOW` freezes that profile until the outputs change. Counted per fingerprint and set deliberately high (12 per 30s) — an earlier global counter at 3 per 60s false-fired on three legitimate saves across two different layouts and silently dropped a real one. Every save from a human clicking Apply in a display GUI is genuine, so the threshold must sit far above human clicking speed.
 
 `wdisplays` (`$mod+Shift+d`) is the GUI for *making* a change, which the daemon then captures. It replaced `nwg-displays` because it drives wlr-output-management directly, and that protocol advertises a head for every connected output including disabled ones — so a display a profile has disabled is still listed, with an `_Enabled` checkbox. nwg-displays' drag canvas is built from `i3.get_tree()`, which omits inactive outputs. (nwg-displays could *also* re-enable one, via an "Active:" checkbox row sourced from `get_outputs()`, but that row is built once at startup and never refreshed, and `main.py:583` does an unguarded `display_buttons[0].select()` that raises `IndexError` when nothing is active.)
@@ -98,9 +99,34 @@ Test the daemon's pure functions without a sway session by extracting the helper
 
 ```bash
 sed -n '1,/^# ─── Acting/p' bin/sway-output-profiles > /tmp/helpers.sh
-bash -c 'source /tmp/helpers.sh; S=$(cat fixture.json); snapshot_usable "$S" && fingerprint "$S" && gen_profile "$S" "$(dupes_present "$S")"'
+bash -c 'source /tmp/helpers.sh; S=$(cat fixture.json); snapshot_usable "$S" && fingerprint "$S" "" && gen_profile "$S" "$(dupes_present "$S")"'
+# fingerprint's second argument is lid state: "" or "closed". The two must differ,
+# and each must be byte-stable across runs.
 ```
+
+### Lid handling — `bin/sway-docked`
+
+One helper holds every "does an external display change what we do?" decision, and its
+exit status means **0 = docked / handled** in all three forms. That is what lets the sway
+config express the policy as plain shell without duplicating anything:
+
+```
+bindswitch --reload --locked lid:on  exec $docked lid-close || $locker
+bindswitch --reload --locked lid:off exec $docked lid-open
+    timeout 660  "$docked || systemctl suspend" \
+```
+
+`exec` hands its whole line to `sh`, so `||` works — same reason the `grimshot … | swappy`
+bindings do. Keeping the fallback in the config rather than inside `sway-docked` is
+deliberate: `set $locker` stays the one place the lock command appears, so the installer's
+`LOCKER_COLOR` sed keeps working and `sway-docked` needs no patching at install time.
+
+- **logind is not involved.** `HandleLidSwitchDocked=ignore` is already the default and logind counts any connected non-`eDP`/`LVDS`/`DSI` DRM connector as docked, so it ignores the lid whenever a monitor is plugged in. The installer touches no logind config. The suspend that used to happen while docked came from swayidle's 660s timer, not from the lid.
+- **`lid-open` only undoes a `lid-close` of ours** — it returns early unless the lid file says `closed`. A layout may legitimately disable the built-in display with the lid open, and `--reload` fires this binding on every `$mod+Shift+r`; without the guard, a reload would re-enable a display the user switched off in `wdisplays`.
+- **Internal panels are matched by name** (`^(eDP|LVDS|DSI)-`), the same rule logind uses, and read from `get_outputs` rather than hardcoded.
+- **Every failure path falls towards locking.** A failed or empty `get_outputs` yields an external count of 0, i.e. "not docked", i.e. lock.
+- **`lid-open` issues a bare `output … enable`** and lets the resulting output event make the daemon apply the saved lid-open profile a moment later. Momentarily wrong geometry is the price of still getting a usable screen when no profile exists yet.
 
 ## Keeping docs honest
 
-`README.md` documents user-facing behaviour — package list, the three install prompts, keybindings, idle timings, monitor handling — all of which live in `setup-sway.sh`, `config/sway/config` and `bin/sway-output-profiles`. Those files are the source of truth; when changing a binding, prompt, or package, update the README table in the same commit. It has drifted before. The installer's own summary block at the end of `setup-sway.sh` is a *third* copy of some of this and drifts most easily.
+`README.md` documents user-facing behaviour — package list, the three install prompts, keybindings, idle timings, lid behaviour, monitor handling — all of which live in `setup-sway.sh`, `config/sway/config`, `bin/sway-output-profiles` and `bin/sway-docked`. Those files are the source of truth; when changing a binding, prompt, or package, update the README table in the same commit. It has drifted before. The installer's own summary block at the end of `setup-sway.sh` is a *third* copy of some of this and drifts most easily.
