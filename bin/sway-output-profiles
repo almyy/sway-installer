@@ -1,0 +1,317 @@
+#!/usr/bin/env bash
+# sway-output-profiles — remember a monitor layout per set of connected outputs.
+#
+# Watches sway's output events. When the set of connected outputs changes it
+# applies the profile saved for that exact set, or — if it has never seen that
+# set before — creates one from whatever state sway settled on. While the set is
+# unchanged, any layout change you make (wdisplays, `swaymsg output …`) is
+# saved back into that set's profile.
+#
+# Profiles are plain sway `output` command lines, one file per set, under
+# ~/.config/sway-output-profiles/profiles/. They are hand-editable, and are also
+# valid `include` targets for sway's own config.
+#
+# Started from sway's config with exec_always. A second invocation does not
+# start a second daemon: it signals the running one to re-apply, which is what
+# restores the layout after `swaymsg reload` resets it.
+
+set -uo pipefail
+
+PROFILE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sway-output-profiles/profiles"
+RUNDIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+LOCKFILE="$RUNDIR/sway-output-profiles.lock"
+PIDFILE="$RUNDIR/sway-output-profiles.pid"
+
+DEBOUNCE=0.4      # seconds of quiet after the last event before acting
+DEBOUNCE_MAX=5    # ceiling on draining, for docks that enumerate slowly
+TICK=1            # main loop poll interval
+SAVE_DELAY=2      # settle time before committing a save
+SUPPRESS=3        # ignore saves for this long after we apply something
+LOOP_WINDOW=30    # loop-breaker window
+LOOP_MAX=12       # writes per fingerprint per window before quarantine
+
+log() { printf '[sway-output-profiles] %s\n' "$*" >&2; }
+now() { printf '%(%s)T' -1; }
+
+# ─── Shared jq filter ─────────────────────────────────────────────────────────
+# get_outputs also reports non-desktop outputs (VR / DRM-lease headsets). They
+# are not part of a desktop layout and configuring them would be wrong.
+#
+# sway's synthetic fallback output — which holds orphaned workspaces when every
+# real output disappears — needs no filtering here: ipc-server.c already skips
+# it (`!output->enabled && output != root->fallback_output`). Filtering by name
+# instead would wrongly discard real outputs on a headless sway session.
+JQ_REAL='[ .[] | select((.non_desktop // false) | not) ]'
+
+# ─── Snapshot helpers ─────────────────────────────────────────────────────────
+
+# A snapshot is unusable while outputs are powered off: sway then reports
+# current_mode as 0x0@0, and saving that would write `mode 0x0@0Hz` into the
+# profile. swayidle blanks the screens on a timer, so this is routine, not rare.
+#
+# The last clause is the important one. Every other check is of the form
+# "(inactive) or (sane)", so with *every* output inactive they are all vacuously
+# true and an all-disabled state reads as a perfectly good snapshot. Saving that
+# writes a profile of nothing but `disable` lines, which is then reapplied at
+# every login — one misclick in a display GUI becoming a permanently black
+# session. Requiring at least one active output is what makes that unreachable.
+snapshot_usable() {
+  jq -e "$JQ_REAL"' as $o
+    | ($o | length) > 0
+      and all($o[]; (.active | not) or (.power != false and .dpms != false))
+      and all($o[]; (.active | not) or ((.current_mode.width // 0) > 0))
+      and ([$o[] | select(.active)] | length) > 0
+  ' >/dev/null 2>&1 <<<"$1"
+}
+
+# Identity of the connected set. Normally the sorted "make model serial"
+# descriptions. Two identical panels report identical descriptions, though, and
+# a criteria matching two outputs would stack them — so when a description
+# repeats we fold the connector names in as well. Connector names are not stable
+# across reboots, which makes that case fail safe: a shuffle yields a *new*
+# profile (one re-arrange) rather than a wrong-monitor apply.
+fingerprint() {
+  jq -r "$JQ_REAL"' as $o
+    | ($o | map("\(.make // "Unknown") \(.model // "Unknown") \(.serial // "Unknown")") | sort) as $ds
+    | (($ds | group_by(.) | map(select(length > 1)) | length) > 0) as $dup
+    | "\($ds | length)|" + ($ds | join("\u001f"))
+      + (if $dup then "|" + ($o | map(.name) | sort | join("\u001f")) else "" end)
+  ' <<<"$1" 2>/dev/null
+}
+
+# 1 when any description repeats, so the profile must key on connector names.
+dupes_present() {
+  jq -r "$JQ_REAL"'
+    | map("\(.make // "Unknown") \(.model // "Unknown") \(.serial // "Unknown")")
+    | group_by(.) | map(select(length > 1)) | length
+    | if . > 0 then 1 else 0 end
+  ' <<<"$1" 2>/dev/null || printf 0
+}
+
+profile_path() {
+  printf '%s/%02d-%s.conf' "$PROFILE_DIR" "${1%%|*}" \
+    "$(printf '%s' "$1" | sha256sum | cut -c1-12)"
+}
+
+# Deterministic by construction — no timestamp, sorted by connector name. A
+# timestamp would make every comparison read as "changed" and the daemon would
+# rewrite the file forever.
+#
+# Only directives known to be accepted are emitted. sway builds one atomic
+# configuration; a single rejected directive drops the whole apply, so
+# `adaptive_sync on` appears only where the hardware already has it enabled, and
+# `adaptive_sync off` (the default anyway) never appears at all.
+#
+# Note `position X Y` rather than `position X,Y`: sway's command parser splits
+# arguments on `;` and `,`, so the comma form silently breaks over IPC.
+gen_profile() {
+  jq -r --argjson byname "${2:-0}" '
+    def crit: if $byname == 1 then .name
+              else "\(.make // "Unknown") \(.model // "Unknown") \(.serial // "Unknown")" end;
+    '"$JQ_REAL"'
+    | sort_by(.name)
+    | ( ["# sway-output-profiles — generated. Edit freely; it is rewritten when",
+         "# you change this layout. Matched by the exact set of connected outputs.",
+         "#"]
+      + map("#   \(.name)  \(.make // "Unknown") \(.model // "Unknown") \(.serial // "Unknown")")
+      + [""]
+      + map(
+          if .active then
+            "output \"\(crit)\" enable"
+            + " mode \(.current_mode.width)x\(.current_mode.height)"
+            + (if (.current_mode.refresh // 0) > 0
+               then "@\(.current_mode.refresh / 1000)Hz" else "" end)
+            + " position \(.rect.x) \(.rect.y)"
+            + " scale \(((.scale // 1) * 1000 | round) / 1000)"
+            + " transform \(.transform // "normal")"
+            + (if .adaptive_sync_status == "enabled" then " adaptive_sync on" else "" end)
+          else
+            "output \"\(crit)\" disable"
+          end) )
+    | .[]
+  ' <<<"$1" 2>/dev/null
+}
+
+# ─── Acting ───────────────────────────────────────────────────────────────────
+
+# Enables first, disables last, in a single IPC round trip, which keeps outputs
+# from colliding mid-apply.
+apply_profile() {
+  local file="$1" line joined
+  local -a enables=() disables=()
+  while IFS= read -r line; do
+    case "$line" in ''|'#'*) continue ;; esac
+    if [[ "$line" == *' disable' ]]; then disables+=("$line"); else enables+=("$line"); fi
+  done <"$file"
+  # A profile that enables nothing would black the session out, and no Wayland
+  # client could undo it (sway's fallback output has no scene output, so nothing
+  # is composited). Versions before the snapshot_usable zero-active guard could
+  # write such a file, so refuse to act on one rather than trusting the disk.
+  (( ${#enables[@]} )) || {
+    log "refusing to apply $(basename "$file") — it enables no outputs"
+    return 0
+  }
+  joined=$(printf '%s; ' "${enables[@]}" "${disables[@]}")
+  if swaymsg -- "${joined%'; '}" >/dev/null 2>&1; then
+    log "applied $(basename "$file")"
+  else
+    log "apply FAILED for $(basename "$file") — layout left as sway configured it"
+  fi
+  suppress_until=$(( $(now) + SUPPRESS ))
+}
+
+write_profile() {
+  local snap="$1" fp="$2" why="$3" file content nowsec
+  [[ "$quarantine_fp" == "$fp" ]] && return 1
+  file=$(profile_path "$fp")
+  content=$(gen_profile "$snap" "$(dupes_present "$snap")")
+  [[ -n "$content" ]] || { log "refusing to write empty profile"; return 1; }
+  if [[ -f "$file" && "$(<"$file")" == "$content" ]]; then
+    return 0
+  fi
+
+  # Loop-breaker: a backstop against a runaway rewrite, e.g. if sway kept
+  # snapping a mode or scale to something other than what was written. Counted
+  # per fingerprint — a global counter would trip on a handful of legitimate
+  # saves across different layouts — and set well above what a human clicking
+  # Apply in a display GUI can reach, since those saves are all genuine.
+  nowsec=$(now)
+  if [[ "$fp" != "$loop_fp" ]] || (( nowsec - loop_window_start > LOOP_WINDOW )); then
+    loop_fp="$fp"
+    loop_window_start=$nowsec
+    loop_count=0
+  fi
+  loop_count=$(( loop_count + 1 ))
+  if (( loop_count > LOOP_MAX )); then
+    if [[ "$quarantine_fp" != "$fp" ]]; then
+      quarantine_fp="$fp"
+      log "loop-breaker: $(basename "$file") rewritten ${loop_count}x in ${LOOP_WINDOW}s — frozen until outputs change"
+    fi
+    return 1
+  fi
+
+  mkdir -p "$PROFILE_DIR" || return 1
+  printf '%s\n' "$content" >"$file.tmp.$$" && mv -f "$file.tmp.$$" "$file" || return 1
+  log "$why $(basename "$file")"
+}
+
+# Applying never seeds, and seeding never applies — a freshly seeded profile
+# already describes the live state, so there is nothing to apply.
+reconcile() {
+  local snap="$1" fp="$2" file
+  pending_at=0
+  file=$(profile_path "$fp")
+  if [[ -f "$file" ]]; then
+    apply_profile "$file"
+  else
+    write_profile "$snap" "$fp" "seeded"
+  fi
+}
+
+# ─── Main cycle ───────────────────────────────────────────────────────────────
+
+do_cycle() {
+  local forced="${1:-0}" snap fp
+  snap=$(swaymsg -t get_outputs -r 2>/dev/null) || { log "get_outputs failed"; return; }
+  snapshot_usable "$snap" || return   # deliberately does not touch last_fp
+  fp=$(fingerprint "$snap")
+  [[ -n "$fp" ]] || return
+
+  if (( forced )) || [[ "$fp" != "$last_fp" ]]; then
+    [[ "$fp" != "$last_fp" ]] && quarantine_fp=""
+    last_fp="$fp"
+    reconcile "$snap" "$fp"
+    return
+  fi
+
+  (( $(now) < suppress_until )) && return   # our own apply echoing back
+
+  # Same outputs, different geometry: the user changed something. Commit only
+  # after it has held still for SAVE_DELAY, so a reload — which resets the
+  # layout and then signals us to re-apply — cannot be mistaken for an edit.
+  pending_fp="$fp"
+  pending_at=$(( $(now) + SAVE_DELAY ))
+}
+
+flush_pending() {
+  local snap fp
+  (( pending_at )) || return
+  (( $(now) < pending_at )) && return
+  fp="$pending_fp"
+  pending_at=0
+  pending_fp=""
+  (( $(now) < suppress_until )) && return
+  snap=$(swaymsg -t get_outputs -r 2>/dev/null) || return
+  snapshot_usable "$snap" || return
+  [[ "$(fingerprint "$snap")" == "$fp" ]] || return
+  write_profile "$snap" "$fp" "saved"
+}
+
+# ─── Startup ──────────────────────────────────────────────────────────────────
+
+command -v jq >/dev/null 2>&1 || { log "jq is required"; exit 1; }
+swaymsg -t get_version >/dev/null 2>&1 || { log "no sway IPC — not running under sway?"; exit 1; }
+
+exec 9>"$LOCKFILE"
+if ! flock -n 9; then
+  # Already running. This invocation is sway re-running exec_always on reload,
+  # which has just reset the output layout — tell the incumbent to restore it.
+  pid=$(cat "$PIDFILE" 2>/dev/null)
+  if [[ -n "${pid:-}" ]] && kill -USR1 "$pid" 2>/dev/null; then
+    log "signalled running daemon (pid $pid) to re-apply"
+  else
+    log "lock held but no live daemon found — stale $PIDFILE?"
+  fi
+  exit 0
+fi
+printf '%s\n' "$$" >"$PIDFILE"
+
+last_fp=""
+pending_fp=""
+pending_at=0
+suppress_until=0
+quarantine_fp=""
+loop_fp=""
+loop_window_start=0
+loop_count=0
+reapply=0
+
+trap 'reapply=1' USR1
+trap 'rm -f "$PIDFILE"; exit 0' TERM INT
+trap 'rm -f "$PIDFILE"' EXIT
+
+mkdir -p "$PROFILE_DIR" 2>/dev/null
+log "watching outputs; profiles in $PROFILE_DIR"
+do_cycle 1
+
+while :; do
+  rc=0
+  IFS= read -r -t "$TICK" -u 3 _ || rc=$?
+
+  if (( rc == 0 )); then
+    # Drain until DEBOUNCE seconds of quiet, or DEBOUNCE_MAX overall.
+    deadline=$(( $(now) + DEBOUNCE_MAX ))
+    while IFS= read -r -t "$DEBOUNCE" -u 3 _; do
+      (( $(now) >= deadline )) && break
+    done
+    if (( reapply )); then
+      reapply=0
+      suppress_until=$(( $(now) + SUPPRESS ))
+      do_cycle 1
+    else
+      do_cycle
+    fi
+  elif (( rc > 128 )); then
+    # Timeout, or a signal interrupted the read.
+    if (( reapply )); then
+      reapply=0
+      suppress_until=$(( $(now) + SUPPRESS ))
+      do_cycle 1
+    fi
+  else
+    log "sway IPC closed — exiting"
+    break
+  fi
+
+  flush_pending
+done 3< <(exec swaymsg -t subscribe -m -r '["output"]')

@@ -41,10 +41,13 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_SRC="$SCRIPT_DIR/config"
 THEMES_DIR="$SCRIPT_DIR/themes"
+BIN_SRC="$SCRIPT_DIR/bin"
 CONFIG_DST="$HOME/.config"
+BIN_DST="$HOME/.local/bin"
 
 [[ -d "$CONFIG_SRC" ]]  || die "config/ directory not found (expected: $CONFIG_SRC)"
 [[ -d "$THEMES_DIR" ]]  || die "themes/ directory not found (expected: $THEMES_DIR)"
+[[ -d "$BIN_SRC" ]]     || die "bin/ directory not found (expected: $BIN_SRC)"
 
 # ─── 1. Packages ──────────────────────────────────────────────────────────────
 section "Installing packages"
@@ -68,7 +71,8 @@ PACKAGES=(
   nwg-bar
   gnome-keyring
   libpam-gnome-keyring
-  nwg-displays
+  wdisplays
+  jq
 )
 
 MISSING=()
@@ -191,6 +195,25 @@ install_config() {
   ok "Installed: $dst"
 }
 
+# Install an executable we ship. No .bak: the backup contract is about the
+# user's own pre-installer configs, and this is our script, not theirs.
+install_bin() {
+  local src="$1"
+  local dst="$2"
+
+  if $DRY_RUN; then
+    dry "would install: $src → $dst (mode 0755)"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$dst")"
+  cp "$src" "$dst"
+  chmod 0755 "$dst"
+  ok "Installed: $dst"
+}
+
+install_bin "$BIN_SRC/sway-output-profiles" "$BIN_DST/sway-output-profiles"
+
 # sway/config — install from config/ then patch theme colours in place
 install_config "$CONFIG_SRC/sway/config" "$CONFIG_DST/sway/config"
 
@@ -307,10 +330,12 @@ echo -e "       swaymsg \"output * bg /path/to/image fill\""
 echo -e "     Or edit ~/.config/sway/config:"
 echo -e "       output * bg /path/to/image fill"
 echo ""
-echo -e "  3. ${CYAN}Configure monitors${RESET} — run:"
-echo -e "       nwg-displays"
-echo -e "     It saves your layout to ~/.config/sway/outputs, which"
-echo -e "     ~/.config/sway/config already includes."
+echo -e "  3. ${CYAN}Monitors configure themselves${RESET} — nothing to do."
+echo -e "     Each set of connected displays gets its own remembered layout in"
+echo -e "     ~/.config/sway-output-profiles/profiles/. Plug a monitor in and a"
+echo -e "     profile is created; rearrange with ${BOLD}Super+Shift+d${RESET} and the change is"
+echo -e "     saved and reapplied next time that monitor is connected."
+echo -e "     Lost a display? ${BOLD}Super+Ctrl+d${RESET} turns them all back on."
 echo ""
 echo -e "  4. ${CYAN}Brightness keys${RESET} need brightnessctl:"
 echo -e "       sudo apt install brightnessctl"
@@ -324,6 +349,8 @@ echo -e "    Super+Enter         terminal"
 echo -e "    Super+d             launcher (wofi)"
 echo -e "    Super+l             lock screen"
 echo -e "    Super+Shift+p       power menu (shutdown/reboot/logout)"
+echo -e "    Super+Shift+d       display layout (wdisplays)"
+echo -e "    Super+Ctrl+d        turn all displays back on"
 echo -e "    Super+Shift+e       exit sway"
 echo -e "    Super+Shift+r       reload config"
 echo -e "    Super+r             resize mode"

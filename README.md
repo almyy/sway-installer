@@ -20,7 +20,8 @@ Installs and configures sway with a small, focused set of tools and a consistent
 | `network-manager-gnome` | Wi-Fi / VPN tray applet (`nm-applet`) |
 | `blueman` | Bluetooth tray applet |
 | `nwg-bar` | Power menu (lock / logout / reboot / shutdown) |
-| `nwg-displays` | Graphical monitor layout editor |
+| `wdisplays` | Graphical monitor layout editor |
+| `jq` | JSON parsing, used by the output-profile daemon |
 | `gnome-keyring` + `libpam-gnome-keyring` | Secret storage, unlocked at login |
 | `fonts-jetbrains-mono` | Font used across all components |
 
@@ -51,6 +52,9 @@ Then log out and select **Sway** at the GDM login screen.
 ## Repository layout
 
 ```
+bin/                        # executables, installed to ~/.local/bin/
+└── sway-output-profiles    # remembers a monitor layout per set of outputs
+
 config/                     # theme-independent, shared by all themes
 ├── sway/config             # keybindings, gaps, colours, idle, autostart
 ├── waybar/config           # bar layout and modules
@@ -64,7 +68,7 @@ themes/<name>/              # one directory per theme
 └── mako/config             # notifications — position, timeout, urgency colours
 ```
 
-Files land in `~/.config/<app>/`. On the first run an existing file is moved to `<file>.bak`; later runs overwrite without touching that backup, so `.bak` always holds your pre-installer config.
+Config files land in `~/.config/<app>/` and `bin/` lands in `~/.local/bin/`. On the first run an existing config file is moved to `<file>.bak`; later runs overwrite without touching that backup, so `.bak` always holds your pre-installer config. Shipped executables are overwritten outright — they are ours, not yours.
 
 `config/sway/config` is a complete Nord-themed config that the installer patches in place after copying — theme colours, gap sizes, and border style are substituted into the copy under `~/.config`. `config/waybar/config` gets its `position` patched the same way.
 
@@ -82,14 +86,49 @@ To make it permanent, edit the `output * bg` line in `~/.config/sway/config`.
 
 ### Multiple monitors
 
-Run `nwg-displays` for a drag-and-drop layout editor. It writes your arrangement to `~/.config/sway/outputs`, which `~/.config/sway/config` already includes, so it survives restarts.
+Nothing to configure. A background daemon, `sway-output-profiles`, remembers **one layout per set of connected displays**:
 
-To do it by hand instead, run `swaymsg -t get_outputs` for your display names, then add lines like:
+- Connect a monitor it has not seen before → a profile is created from whatever sway does by default.
+- Rearrange with `wdisplays` (**Super+Shift+d**, or any `swaymsg output …`) → the change is saved into that set's profile a couple of seconds later.
+- Connect that same monitor again → the saved layout is restored automatically.
+
+Profiles live in `~/.config/sway-output-profiles/profiles/`, one file per set, named `<count>-<hash>.conf`. They are plain sway `output` commands and safe to hand-edit — the header comment lists which displays the file is for:
 
 ```
-output HDMI-A-1 resolution 1920x1080 position 0,0
-output eDP-1    resolution 1920x1080 position 0,1080
+# sway-output-profiles — generated. Edit freely; it is rewritten when
+# you change this layout. Matched by the exact set of connected outputs.
+#
+#   DP-3   Dell Inc. DELL U2720Q ABC123
+#   eDP-1  LG Display 0x0000 Unknown
+
+output "Dell Inc. DELL U2720Q ABC123" enable mode 3840x2160@59.951Hz position 0 0 scale 1.5 transform normal
+output "LG Display 0x0000 Unknown" enable mode 1920x1200@60.003Hz position 2560 360 scale 1 transform normal
 ```
+
+Delete a file to forget that layout; it will be recreated from scratch next time those displays are connected. To pin a layout permanently, put the `output` lines in `~/.config/sway/config` instead — those win, and the daemon will keep recording the result.
+
+#### Lost a display
+
+**Super+Ctrl+d turns every connected display back on.** Use it any time a screen is missing
+and you are not sure why — it is safe to press at any point, and works even with nothing on
+screen at all.
+
+A layout can legitimately disable a display (a docked laptop with the lid screen off, say),
+and that gets remembered like any other setting. `wdisplays` lists disabled displays
+alongside the active ones, each with an **Enabled** checkbox, so you can turn one back on
+there too.
+
+Super+Ctrl+d is deliberately blunt: it enables everything and does nothing else. If a
+display was off on purpose, switch it back off in `wdisplays` afterwards and that will be
+saved again. It exists because with *every* display disabled nothing is composited, so no
+GUI can draw anything — a keybinding is the only way back. The daemon will never save an
+all-off layout, so you should not be able to get there by accident.
+
+Notes:
+
+- Two monitors of the same model *and* serial cannot be told apart by description, so those profiles key on connector name (`DP-1`, `DP-2`) instead. Connector names can shuffle across reboots or dock re-plugs; if that happens you get a fresh profile and one re-arrange.
+- If `wdisplays` is open when you plug or unplug a monitor, its window resets to match the new hardware and an edit in progress may need redoing — normal behaviour for any output-management client, not specific to this setup.
+- Daemon output goes to the sway log — `journalctl --user -b | grep sway-output-profiles` if something looks wrong.
 
 ### Brightness keys
 
@@ -120,6 +159,8 @@ Firefox, Chrome, and other apps use `xdg-desktop-portal-wlr`. If it doesn't work
 | `Super+d` | Launcher (wofi) |
 | `Super+l` | Lock screen |
 | `Super+Shift+p` | Power menu (nwg-bar) |
+| `Super+Shift+d` | Display layout (wdisplays) |
+| `Super+Ctrl+d` | Turn every connected display back on |
 | `Super+Shift+q` | Kill focused window |
 | `Super+Shift+r` | Reload config |
 | `Super+Shift+e` | Exit sway (with confirmation) |

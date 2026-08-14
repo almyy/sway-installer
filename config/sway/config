@@ -12,24 +12,19 @@ set $locker     swaylock -f -c 1a1a2e
 font pango:JetBrains Mono 10
 
 # ─── Output ───────────────────────────────────────────────────────────────────
-# Uncomment and adapt for your setup.
-# Run `swaymsg -t get_outputs` to list output names.
+# Monitor layouts are handled automatically by sway-output-profiles (see the
+# Autostart section below), which remembers one layout per set of connected
+# outputs under ~/.config/sway-output-profiles/profiles/. Arrange your displays
+# with `wdisplays` ($mod+Shift+d) and the change is saved for you.
 #
-# Single internal display:
+# Nothing needs to go here. If you do want a fixed rule that applies regardless
+# of what else is plugged in, `swaymsg -t get_outputs` lists your output names:
+#
 # output eDP-1 scale 1
-#
-# External monitor as primary, internal below:
 # output HDMI-A-1 resolution 1920x1080 position 0,0
-# output eDP-1    resolution 1920x1080 position 0,1080
-#
-# Disable internal when external is connected:
-# output eDP-1 disable     # put in a per-workspace/mode script instead
 
 # Default wallpaper (solid colour — replace with a path to an image if desired)
 output * bg #1a1a2e solid_color
-
-# Output layout written by nwg-displays. Harmless if the file does not exist yet.
-include outputs
 
 # ─── Input ────────────────────────────────────────────────────────────────────
 # Touchpad
@@ -60,6 +55,11 @@ exec swayidle -w \
 bindswitch --reload --locked lid:on exec $locker
 
 # ─── Autostart ────────────────────────────────────────────────────────────────
+# exec_always, not exec: a reload rebuilds the output layout from this file
+# alone, so the second invocation signals the running daemon to put your saved
+# layout back. It will not start a second copy.
+exec_always "$HOME/.local/bin/sway-output-profiles"
+
 exec mako
 exec waybar
 exec nm-applet --indicator
@@ -93,6 +93,14 @@ bindsym $mod+Shift+e      exec swaynag -t warning \
     -m 'Exit sway?' \
     -B 'Yes, exit' 'swaymsg exit'
 bindsym $mod+Shift+p      exec nwg-bar
+bindsym $mod+Shift+d      exec wdisplays
+
+# Escape hatch: turn every connected display back on. A sway command, not
+# `exec swaymsg` — it needs no shell, no IPC socket and no running daemon. With
+# every output disabled nothing is composited, so no GUI can render to undo it;
+# this binding runs inside sway and is the only way back. --locked so it works
+# with the lock screen up.
+bindsym --locked $mod+Ctrl+d output * enable
 
 # Move workspace to output
 bindsym $mod+Ctrl+Shift+Left   move workspace to output left
