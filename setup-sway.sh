@@ -73,6 +73,7 @@ PACKAGES=(
   libpam-gnome-keyring
   wdisplays
   jq
+  pulseaudio-utils
 )
 
 MISSING=()
@@ -214,6 +215,7 @@ install_bin() {
 
 install_bin "$BIN_SRC/sway-output-profiles" "$BIN_DST/sway-output-profiles"
 install_bin "$BIN_SRC/sway-docked"          "$BIN_DST/sway-docked"
+install_bin "$BIN_SRC/sway-audio-inhibit"   "$BIN_DST/sway-audio-inhibit"
 
 # sway/config — install from config/ then patch theme colours in place
 install_config "$CONFIG_SRC/sway/config" "$CONFIG_DST/sway/config"
@@ -339,6 +341,8 @@ echo -e "     saved and reapplied next time that monitor is connected."
 echo -e "     Lost a display? ${BOLD}Super+Ctrl+d${RESET} turns them all back on."
 echo -e "     Closing the lid with an external display connected just turns the"
 echo -e "     built-in screen off — no lock, no suspend. On its own it locks."
+echo -e "     While audio is playing the screen never idle-locks; the 5-minute"
+echo -e "     countdown starts when playback stops."
 echo ""
 echo -e "  4. ${CYAN}Brightness keys${RESET} need brightnessctl:"
 echo -e "       sudo apt install brightnessctl"

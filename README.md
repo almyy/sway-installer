@@ -22,6 +22,7 @@ Installs and configures sway with a small, focused set of tools and a consistent
 | `nwg-bar` | Power menu (lock / logout / reboot / shutdown) |
 | `wdisplays` | Graphical monitor layout editor |
 | `jq` | JSON parsing, used by the output-profile daemon |
+| `pulseaudio-utils` | `pactl`, used to keep the screen awake while audio plays |
 | `gnome-keyring` + `libpam-gnome-keyring` | Secret storage, unlocked at login |
 | `fonts-jetbrains-mono` | Font used across all components |
 
@@ -54,7 +55,8 @@ Then log out and select **Sway** at the GDM login screen.
 ```
 bin/                        # executables, installed to ~/.local/bin/
 ├── sway-output-profiles    # remembers a monitor layout per set of outputs
-└── sway-docked             # lid and idle behaviour when an external display is connected
+├── sway-docked             # lid and idle behaviour when an external display is connected
+└── sway-audio-inhibit      # no idle lock while audio is playing
 
 config/                     # theme-independent, shared by all themes
 ├── sway/config             # keybindings, gaps, colours, idle, autostart
@@ -218,11 +220,17 @@ Volume and mic mute go through `wpctl` (PipeWire); brightness needs `brightnessc
 | Lid close, no external display | Lock screen (and logind suspends) |
 | Lid open | Turn the built-in display back on |
 | Before sleep | Lock screen |
+| Audio playing (any app) | No idle lock, blank or suspend — the countdown restarts when playback stops or pauses |
 
 Closing the lid while docked does not lock, on the grounds that you are sitting in front of
 the external screen. Idle still locks after 5 minutes either way. A display is "external"
 when sway names it something other than `eDP-*`, `LVDS-*` or `DSI-*` — the same rule
 systemd-logind uses.
+
+Audio counts as playing while any PipeWire/PulseAudio stream is uncorked, so this covers
+background tabs and music too — walk away with music on and the screen will not lock (use
+`Super+l`). An app that holds a silent stream open will block idle as well; find it with
+`pactl list sink-inputs short`.
 
 ## Adding a theme
 

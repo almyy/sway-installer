@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# sway-audio-inhibit — keep swayidle from locking while audio is playing.
+#
+# Browsers and players only hold a Wayland idle inhibitor while their window is
+# visible, and many (XWayland apps, background tabs, music) never take one. So
+# instead we watch PulseAudio/PipeWire streams: while any stream is playing,
+# every window gets `inhibit_idle open`, which inhibits regardless of
+# visibility; when the last one stops or pauses, they go back to sway's default
+# of `inhibit_idle none`.
+#
+# An inhibitor resets swayidle's timers rather than skipping one timeout, so
+# the full lock / blank / suspend countdown starts over when playback stops.
+#
+# Started from sway's config with exec. A second copy exits on the lock.
+
+set -uo pipefail
+
+RUNDIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+LOCKFILE="$RUNDIR/sway-audio-inhibit.lock"
+
+IDLE_CHECK=60     # seconds between "is sway still there?" checks when quiet
+RETRY=2           # pause before re-subscribing after pactl exits
+
+log() { printf '[sway-audio-inhibit] %s\n' "$*" >&2; }
+
+# A paused player either corks its stream or closes it, so "uncorked stream
+# exists" is "something is playing".
+playing() {
+  pactl -f json list sink-inputs 2>/dev/null |
+    jq -e 'any(.[]; .corked == false)' >/dev/null 2>&1
+}
+
+state=""
+update() {
+  local want=none
+  playing && want=open
+  [[ "$want" == "$state" ]] && return
+  # Fails harmlessly with "No matching node" when there are no windows.
+  swaymsg -q "[all] inhibit_idle $want" 2>/dev/null
+  state=$want
+  log "inhibit_idle $want"
+}
+
+sway_alive() { swaymsg -t get_version >/dev/null 2>&1; }
+
+# ─── Startup ──────────────────────────────────────────────────────────────────
+
+command -v jq    >/dev/null 2>&1 || { log "jq is required"; exit 1; }
+command -v pactl >/dev/null 2>&1 || { log "pactl is required (pulseaudio-utils)"; exit 1; }
+sway_alive || { log "no sway IPC — not running under sway?"; exit 1; }
+
+exec 9>"$LOCKFILE"
+flock -n 9 || { log "already running"; exit 0; }
+
+while sway_alive; do
+  update
+  while :; do
+    rc=0
+    IFS= read -r -t "$IDLE_CHECK" -u 3 line || rc=$?
+    if (( rc == 0 )); then
+      [[ "$line" == *sink-input* ]] && update
+    elif (( rc > 128 )); then
+      sway_alive || break 2
+    else
+      log "pactl subscribe ended — retrying"
+      break
+    fi
+  done 3< <(exec pactl subscribe 2>/dev/null)
+  sleep "$RETRY"
+done
+
+# Leave windows as sway would have them.
+[[ "$state" == open ]] && swaymsg -q '[all] inhibit_idle none' 2>/dev/null
+log "sway IPC closed — exiting"

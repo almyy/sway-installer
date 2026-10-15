@@ -71,6 +71,9 @@ bindswitch --reload --locked lid:off exec $docked lid-open
 # layout back. It will not start a second copy.
 exec_always "$HOME/.local/bin/sway-output-profiles"
 
+# No idle lock / blank / suspend while audio is playing (YouTube, music, calls).
+exec "$HOME/.local/bin/sway-audio-inhibit"
+
 exec mako
 exec waybar
 exec nm-applet --indicator
