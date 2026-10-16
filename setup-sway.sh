@@ -73,7 +73,7 @@ PACKAGES=(
   libpam-gnome-keyring
   wdisplays
   jq
-  pulseaudio-utils
+  playerctl
 )
 
 MISSING=()
@@ -341,7 +341,7 @@ echo -e "     saved and reapplied next time that monitor is connected."
 echo -e "     Lost a display? ${BOLD}Super+Ctrl+d${RESET} turns them all back on."
 echo -e "     Closing the lid with an external display connected just turns the"
 echo -e "     built-in screen off — no lock, no suspend. On its own it locks."
-echo -e "     While audio is playing the screen never idle-locks; the 5-minute"
+echo -e "     While media is playing the screen never idle-locks; the 5-minute"
 echo -e "     countdown starts when playback stops."
 echo ""
 echo -e "  4. ${CYAN}Brightness keys${RESET} need brightnessctl:"

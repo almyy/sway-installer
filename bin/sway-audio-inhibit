@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# sway-audio-inhibit — keep swayidle from locking while audio is playing.
+# sway-audio-inhibit — keep swayidle from locking while media is playing.
 #
 # Browsers and players only hold a Wayland idle inhibitor while their window is
 # visible, and many (XWayland apps, background tabs, music) never take one. So
-# instead we watch PulseAudio/PipeWire streams: while any stream is playing,
-# every window gets `inhibit_idle open`, which inhibits regardless of
+# instead we watch MPRIS players via playerctl: while any player reports
+# Playing, every window gets `inhibit_idle open`, which inhibits regardless of
 # visibility; when the last one stops or pauses, they go back to sway's default
 # of `inhibit_idle none`.
+#
+# MPRIS, not "is an audio stream open": web pages using WebAudio (Teams,
+# games, …) hold an uncorked but silent PulseAudio stream for as long as the
+# tab is open, which would block idle forever. Browsers only report Playing to
+# MPRIS for an actual <audio>/<video> element, e.g. YouTube.
 #
 # An inhibitor resets swayidle's timers rather than skipping one timeout, so
 # the full lock / blank / suspend countdown starts over when playback stops.
@@ -18,16 +23,17 @@ set -uo pipefail
 RUNDIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 LOCKFILE="$RUNDIR/sway-audio-inhibit.lock"
 
-IDLE_CHECK=60     # seconds between "is sway still there?" checks when quiet
-RETRY=2           # pause before re-subscribing after pactl exits
+IDLE_CHECK=60     # seconds between re-checks when no player events arrive
+RETRY=2           # pause before re-subscribing after playerctl exits
 
 log() { printf '[sway-audio-inhibit] %s\n' "$*" >&2; }
 
-# A paused player either corks its stream or closes it, so "uncorked stream
-# exists" is "something is playing".
+# Not `playerctl … | grep -q`: under pipefail, grep exiting on the first match
+# SIGPIPEs playerctl if another player's line follows, and the pipeline fails.
 playing() {
-  pactl -f json list sink-inputs 2>/dev/null |
-    jq -e 'any(.[]; .corked == false)' >/dev/null 2>&1
+  local out
+  out=$'\n'$(playerctl -a status 2>/dev/null)$'\n'
+  [[ "$out" == *$'\n'Playing$'\n'* ]]
 }
 
 state=""
@@ -45,29 +51,47 @@ sway_alive() { swaymsg -t get_version >/dev/null 2>&1; }
 
 # ─── Startup ──────────────────────────────────────────────────────────────────
 
-command -v jq    >/dev/null 2>&1 || { log "jq is required"; exit 1; }
-command -v pactl >/dev/null 2>&1 || { log "pactl is required (pulseaudio-utils)"; exit 1; }
+command -v playerctl >/dev/null 2>&1 || { log "playerctl is required"; exit 1; }
 sway_alive || { log "no sway IPC — not running under sway?"; exit 1; }
 
 exec 9>"$LOCKFILE"
 flock -n 9 || { log "already running"; exit 0; }
 
+# The long-lived playerctl child must not inherit fd 9: if it did, killing this
+# script would leave the orphan holding the lock, and every restart would exit
+# with "already running" until logout. Kill it with us, too.
+follow_pid=""
+trap 'stop_follow; exit 0' TERM INT HUP
+
+stop_follow() {
+  [[ -n "$follow_pid" ]] && kill "$follow_pid" 2>/dev/null
+  follow_pid=""
+  exec 3<&-
+}
+
 while sway_alive; do
+  exec 3< <(exec playerctl -a --follow status 9>&- 2>/dev/null)
+  follow_pid=$!
   update
   while :; do
     rc=0
     IFS= read -r -t "$IDLE_CHECK" -u 3 line || rc=$?
     if (( rc == 0 )); then
-      [[ "$line" == *sink-input* ]] && update
+      update
     elif (( rc > 128 )); then
+      # Quiet for a while: confirm sway is still there, and re-check in case
+      # a player vanished without an event.
       sway_alive || break 2
+      update
     else
-      log "pactl subscribe ended — retrying"
+      log "playerctl --follow ended — retrying"
       break
     fi
-  done 3< <(exec pactl subscribe 2>/dev/null)
+  done
+  stop_follow
   sleep "$RETRY"
 done
+stop_follow
 
 # Leave windows as sway would have them.
 [[ "$state" == open ]] && swaymsg -q '[all] inhibit_idle none' 2>/dev/null

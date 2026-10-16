@@ -33,7 +33,7 @@ Two source trees feed `~/.config/`:
 - **`config/`** — theme-agnostic sources: `sway/config`, `waybar/config`, `nwg-bar/bar.json`. One copy, shared by all themes.
 - **`themes/<name>/`** — per-theme variants: `waybar/style.css`, `wofi/style.css`, `foot/foot.ini`, `mako/config` (copied verbatim), plus `sway-theme.conf`.
 
-A third tree, **`bin/`**, feeds `~/.local/bin/` via `install_bin` (cp + `chmod 0755`, no `.bak`). It holds `sway-output-profiles`, `sway-docked` and `sway-audio-inhibit` (while any PulseAudio stream is uncorked, sets `inhibit_idle open` on every window, else back to `none`; needs `pactl` from `pulseaudio-utils`).
+A third tree, **`bin/`**, feeds `~/.local/bin/` via `install_bin` (cp + `chmod 0755`, no `.bak`). It holds `sway-output-profiles`, `sway-docked` and `sway-audio-inhibit` (while any MPRIS player reports Playing, sets `inhibit_idle open` on every window, else back to `none`; needs `playerctl`. Not PulseAudio stream state: WebAudio tabs like Teams hold a silent uncorked stream forever).
 
 `sway-theme.conf` is not a config file — it's a shell fragment `source`d by the installer, exporting `THEME_NAME`, `BG_COLOR`, `LOCKER_COLOR`, and the four `CLIENT_*` colour tuples (`border bg text indicator child_border`).
 
